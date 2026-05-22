@@ -1,7 +1,8 @@
 """
-Writes analysis results to Google Sheets.
-- Creates a tab named YYYY-MM-DD for every run (history preserved).
-- Always overwrites a "Latest" tab for quick access.
+Writes analysis results to a single Google Sheet, appending rows on each run.
+- First run: writes the header row, then the data rows.
+- Subsequent runs: appends data rows below existing data (header not repeated).
+- Column A is always the run date so every row is traceable.
 
 Auth: Google service account with Sheets scope.
 """
@@ -12,10 +13,11 @@ from config import require_env, THRESHOLDS
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 _HEADERS = [
+    "Date",
     "Rank", "Ticker", "Name", "Sector", "Score",
     "DY%", "DGR%", "Payout%", "FCFcov", "Spread%",
     "Price", "Target", "DPS/yr",
-    "DY", "DGR", "Payout", "FCF", "Spread",     # PASS/FAIL columns
+    "DY", "DGR", "Payout", "FCF", "Spread",
 ]
 
 
@@ -31,18 +33,21 @@ def _pf(value: bool) -> str:
     return "✓" if value else "✗"
 
 
-def _build_rows(results: list[dict], run_date: date) -> list[list]:
+def _build_data_rows(results: list[dict], run_date: date) -> list[list]:
+    """Returns only data rows (no header). Each row starts with the run date."""
     ok     = [r for r in results if r["status"] == "ok"]
     errors = [r for r in results if r["status"] == "data_error"]
     ok.sort(key=lambda r: (r["score"], r["metrics"]["spread"]), reverse=True)
 
-    rows = [_HEADERS]
+    date_str = run_date.isoformat()
+    rows = []
 
     for i, r in enumerate(ok, 1):
         m = r["metrics"]
         c = r["checks"]
         dgr_str = f"{m['dgr']:.2f}" if m["dgr"] is not None else "N/A"
         rows.append([
+            date_str,
             i,
             r["ticker"],
             r["name"],
@@ -63,66 +68,48 @@ def _build_rows(results: list[dict], run_date: date) -> list[list]:
             _pf(c["spread"]),
         ])
 
-    if errors:
-        rows.append([])
-        rows.append(["", "DATA ERRORS"])
-        for r in errors:
-            rows.append(["", r["ticker"], r["name"], "", "", "", "", "", "", "", "", "", "", r["error"]])
-
-    rows.append([])
-    rows.append([
-        f"Run: {run_date.isoformat()} | "
-        f"DY≥{THRESHOLDS['dy_min']}%  "
-        f"DGR≥{THRESHOLDS['dgr_min']}%  "
-        f"Payout≤{THRESHOLDS['payout_max']}%  "
-        f"FCFcov≥{THRESHOLDS['fcf_coverage_min']}x  "
-        f"Spread≥{THRESHOLDS['spread_min']}%"
-    ])
+    for r in errors:
+        rows.append([
+            date_str, "ERR", r["ticker"], r["name"], r["sector"],
+            "", "", "", "", "", "", "", "", "", "", "", "", "", r["error"],
+        ])
 
     return rows
 
 
-def _ensure_sheet(svc, spreadsheet_id: str, title: str) -> int:
-    """Return sheetId for `title`, creating it if needed."""
-    meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-    for sheet in meta["sheets"]:
-        if sheet["properties"]["title"] == title:
-            return sheet["properties"]["sheetId"]
-
-    resp = svc.spreadsheets().batchUpdate(
+def _has_header(svc, spreadsheet_id: str, sheet_name: str) -> bool:
+    """True if cell A1 already contains the header label."""
+    result = svc.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+        range=f"'{sheet_name}'!A1",
     ).execute()
-    return resp["replies"][0]["addSheet"]["properties"]["sheetId"]
+    values = result.get("values", [])
+    return bool(values) and values[0][0] == "Date"
 
 
-def _write_tab(svc, spreadsheet_id: str, tab: str, rows: list[list]):
-    range_name = f"'{tab}'!A1"
-    svc.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id, range=f"'{tab}'",
-    ).execute()
-    svc.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=range_name,
-        valueInputOption="RAW",
-        body={"values": rows},
-    ).execute()
-
-
-def write(results: list[dict], run_date: date | None = None):
+def write(results: list[dict], run_date: date | None = None, sheet_name: str = "Analysis"):
     if run_date is None:
         run_date = date.today()
 
     spreadsheet_id = require_env("GOOGLE_SPREADSHEET_ID")
-    svc  = _service()
-    rows = _build_rows(results, run_date)
+    svc = _service()
 
-    tab_name = run_date.isoformat()
-    _ensure_sheet(svc, spreadsheet_id, tab_name)
-    _ensure_sheet(svc, spreadsheet_id, "Latest")
+    if not _has_header(svc, spreadsheet_id, sheet_name):
+        svc.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1",
+            valueInputOption="RAW",
+            body={"values": [_HEADERS]},
+        ).execute()
 
-    _write_tab(svc, spreadsheet_id, tab_name, rows)
-    _write_tab(svc, spreadsheet_id, "Latest",  rows)
+    rows = _build_data_rows(results, run_date)
+    svc.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_name}'!A1",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": rows},
+    ).execute()
 
     ok_count = sum(1 for r in results if r["status"] == "ok")
-    print(f"Google Sheets updated: tab '{tab_name}'  ({ok_count}/{len(results)} tickers OK)")
+    print(f"Google Sheets updated: {ok_count}/{len(results)} rows appended  [{run_date.isoformat()}]")
