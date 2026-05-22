@@ -1,0 +1,10 @@
+[
+  { "ticker": "JNJ",  "name": "Johnson & Johnson",  "sector": "Healthcare" },
+  { "ticker": "KO",   "name": "Coca-Cola",           "sector": "Consumer Staples" },
+  { "ticker": "PG",   "name": "Procter & Gamble",    "sector": "Consumer Staples" },
+  { "ticker": "MMM",  "name": "3M",                  "sector": "Industrials" },
+  { "ticker": "ABBV", "name": "AbbVie",              "sector": "Healthcare" },
+  { "ticker": "T",    "name": "AT&T",                "sector": "Communication" },
+  { "ticker": "VZ",   "name": "Verizon",             "sector": "Communication" },
+  { "ticker": "XOM",  "name": "ExxonMobil",          "sector": "Energy" }
+]
