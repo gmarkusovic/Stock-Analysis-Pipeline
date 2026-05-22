@@ -3,16 +3,15 @@ Overwrites the target Google Doc with the ranked analysis results.
 Uses a Google service account for authentication.
 """
 
-import json
 from datetime import date
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 from config import require_env, THRESHOLDS
 
 _SCOPES = ["https://www.googleapis.com/auth/documents"]
 
 
 def _service():
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
     sa_path = require_env("GOOGLE_SERVICE_ACCOUNT_JSON")
     creds = service_account.Credentials.from_service_account_file(sa_path, scopes=_SCOPES)
     return build("docs", "v1", credentials=creds, cache_discovery=False)
@@ -43,7 +42,7 @@ def _pass_fail(value: bool) -> str:
     return "PASS" if value else "FAIL"
 
 
-def _render(results: list[dict], run_date: date) -> str:
+def render(results: list[dict], run_date: date) -> str:
     ok     = [r for r in results if r["status"] == "ok"]
     errors = [r for r in results if r["status"] == "data_error"]
 
@@ -106,6 +105,6 @@ def write(results: list[dict], run_date: date | None = None):
 
     doc_id = require_env("GOOGLE_DOC_ID")
     svc    = _service()
-    text   = _render(results, run_date)
+    text   = render(results, run_date)
     _clear_and_insert(svc, doc_id, text)
     print(f"Google Doc updated: {len(results)} tickers, {sum(1 for r in results if r['status'] == 'ok')} OK")

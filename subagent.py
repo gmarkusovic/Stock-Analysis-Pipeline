@@ -4,7 +4,7 @@ Single-ticker analysis unit. Called in parallel by the orchestrator.
 
 from __future__ import annotations
 import math
-from sources import sp_global, daloopa
+from sources import sp_global, daloopa, mock
 from config import THRESHOLDS
 
 
@@ -29,10 +29,11 @@ def _score(metrics: dict) -> tuple[int, dict]:
     return sum(checks.values()), checks
 
 
-def analyze(entry: dict) -> dict:
+def analyze(entry: dict, use_mock: bool = False) -> dict:
     """
     Args:
-        entry: {"ticker": str, "name": str, "sector": str}
+        entry:    {"ticker": str, "name": str, "sector": str}
+        use_mock: if True, use sources/mock.py instead of live APIs
 
     Returns dict with keys:
         ticker, name, sector, score (0-5), metrics, checks, status
@@ -42,8 +43,12 @@ def analyze(entry: dict) -> dict:
     ticker = entry["ticker"]
 
     try:
-        sp   = sp_global.fetch(ticker)
-        dalo = daloopa.fetch(ticker)
+        if use_mock:
+            sp   = mock.fetch_sp(ticker)
+            dalo = mock.fetch_dalo(ticker)
+        else:
+            sp   = sp_global.fetch(ticker)
+            dalo = daloopa.fetch(ticker)
     except Exception as exc:
         return {
             "ticker": ticker,
