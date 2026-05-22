@@ -1,45 +1,49 @@
 # Stock Analysis Pipeline
 
-Weekly automated pipeline that runs parallel subagents per company in a watchlist, evaluates each against a dividend/value framework, and consolidates results into a Google Doc ranked by opportunity.
+Weekly automated pipeline that runs parallel subagents per company in a watchlist, evaluates each against a dividend/value framework, and consolidates results into a Google Sheet ranked by opportunity.
 
 ## Architecture
 
 ```
 orchestrator.py
-├── scheduler (runs every Monday night)
-├── subagent per ticker (parallel)
-│   ├── fetch: S&P Global + Daloopa
+├── scheduler (runs every Monday 23:00)
+├── subagent per ticker (parallel, ThreadPoolExecutor)
+│   ├── fetch: yfinance (free) or mock (offline)
 │   ├── calculate: spread vs analyst target
 │   └── evaluate: DY, DGR, payout ratio, FCF
-└── consolidator → Google Doc
+└── consolidator → Google Sheets
 ```
 
 ## Evaluation Framework
 
-| Metric | Description |
-|--------|-------------|
-| DY | Dividend Yield vs sector median |
-| DGR | 5-yr Dividend Growth Rate |
-| Payout Ratio | Target < 75% |
-| FCF | Free Cash Flow coverage of dividend |
-| Spread | (Analyst target - current price) / current price |
+| Metric | Threshold | Source field |
+|--------|-----------|--------------|
+| DY | ≥ 2.5% | dividendRate / currentPrice |
+| DGR | ≥ 5.0% | 5-yr CAGR of annual dividends |
+| Payout Ratio | ≤ 75% | payoutRatio |
+| FCF coverage | ≥ 1.2x | Free Cash Flow / Dividends Paid |
+| Spread | ≥ 10% | (targetMeanPrice − price) / price |
 
-A ticker scores 1 point per metric that passes its threshold. Max score = 5.
+Score = count of passing metrics (0–5).
 
 ## Project Structure
 
 ```
 /
 ├── CLAUDE.md
-├── orchestrator.py        # scheduler + subagent launcher + consolidator
-├── subagent.py            # single-ticker analysis logic
+├── orchestrator.py            # scheduler + launcher + consolidator
+├── subagent.py                # single-ticker analysis
 ├── sources/
-│   ├── sp_global.py       # S&P Global data fetcher
-│   └── daloopa.py         # Daloopa data fetcher
+│   ├── yfinance_source.py     # live data via yfinance (free, no key)
+│   ├── mock.py                # offline test data for all watchlist tickers
+│   ├── sp_global.py           # S&P Global stub (paid, unused by default)
+│   └── daloopa.py             # Daloopa stub (paid, unused by default)
 ├── output/
-│   └── gdoc.py            # Google Docs writer
-├── watchlist.json         # list of tickers to analyze
-└── config.py              # thresholds, credentials refs, schedule
+│   ├── gsheets.py             # Google Sheets writer (one tab per run)
+│   └── gdoc.py                # Google Docs renderer (used for dry-run stdout)
+├── watchlist.json
+├── config.py                  # thresholds, env var refs, schedule
+└── requirements.txt
 ```
 
 ## Watchlist Format
@@ -51,37 +55,41 @@ A ticker scores 1 point per metric that passes its threshold. Max score = 5.
 ]
 ```
 
-## Data Sources
-
-- **S&P Global**: fundamentals (EPS, revenue, analyst targets, payout ratio)
-- **Daloopa**: structured financial model data (FCF, DGR, balance sheet items)
-- Both accessed via their respective APIs; credentials in environment variables.
-
 ## Environment Variables
 
 ```
-SP_GLOBAL_API_KEY=
-DALOOPA_API_KEY=
-GOOGLE_SERVICE_ACCOUNT_JSON=   # path to service account file
-GOOGLE_DOC_ID=                 # target Google Doc to overwrite
+GOOGLE_SERVICE_ACCOUNT_JSON=   # path to service account JSON file
+GOOGLE_SPREADSHEET_ID=         # target Google Spreadsheet ID
 ```
 
-## Output
+No API keys needed for data (yfinance is free).
 
-Google Doc overwritten every run with:
-1. Run date and watchlist size
-2. Ranked table (score desc, then spread desc)
-3. Per-ticker detail block: metrics, analyst target, spread, pass/fail per criterion
+## Usage
 
-## Schedule
+```bash
+pip install -r requirements.txt
 
-- Runs: Monday 23:00 local time (cron or cloud scheduler)
-- Available: Tuesday morning with results ready
-- Trigger manually: `python orchestrator.py --now`
+# Test — no credentials required
+python orchestrator.py --mock --dry-run
+
+# Live data, print to stdout (no Sheets write)
+python orchestrator.py --yfinance --dry-run
+
+# Live data → write to Google Sheets
+python orchestrator.py --yfinance --now
+
+# Scheduler mode (Monday 23:00, writes Sheets automatically)
+python orchestrator.py
+```
+
+## Output: Google Sheets
+
+- Tab `YYYY-MM-DD` created on each run (history preserved).
+- Tab `Latest` always reflects the most recent run.
+- Columns: Rank, Ticker, Name, Sector, Score, DY%, DGR%, Payout%, FCFcov, Spread%, Price, Target, DPS/yr, PASS/FAIL per criterion.
 
 ## Key Constraints
 
-- Subagents run in parallel (one per ticker); orchestrator waits for all before writing output.
-- If a data source fails for a ticker, that ticker is marked `DATA_ERROR` and included at the bottom of the doc.
-- No historical storage; each run is self-contained and overwrites the previous Google Doc.
-- Credentials are never hardcoded; always read from environment variables.
+- Subagents run in parallel; orchestrator waits for all before writing.
+- Failed tickers are marked DATA_ERROR and appended at the bottom of the sheet.
+- Credentials never hardcoded; always from environment variables.
