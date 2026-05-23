@@ -29,13 +29,19 @@ def _service():
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
-    # Prefer JSON content from env var (GitHub Actions) over file path (local)
+    import base64
     sa_content = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    try:
-        info = json.loads(sa_content)
+    info = None
+    for attempt in (sa_content, None):
+        try:
+            info = json.loads(attempt if attempt is not None else base64.b64decode(sa_content))
+            break
+        except Exception:
+            pass
+    if info:
         creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
-    except (json.JSONDecodeError, TypeError):
-        # sa_content is a file path, not JSON
+    else:
+        # sa_content is a file path
         creds = service_account.Credentials.from_service_account_file(sa_content, scopes=_SCOPES)
 
     no_verify = os.getenv("DISABLE_SSL_VERIFY", "0") == "1"
