@@ -19,6 +19,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check secrets are set
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
+        run: |
+          if [ -z "$SA_JSON" ]; then
+            echo "ERROR: secret GOOGLE_SERVICE_ACCOUNT_JSON is empty or not set"
+            exit 1
+          fi
+          if [ -z "$SHEET_ID" ]; then
+            echo "ERROR: secret GOOGLE_SPREADSHEET_ID is empty or not set"
+            exit 1
+          fi
+          echo "GOOGLE_SERVICE_ACCOUNT_JSON length: ${#SA_JSON}"
+          echo "GOOGLE_SPREADSHEET_ID: $SHEET_ID"
+
       - name: Run pipeline
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
