@@ -22,11 +22,18 @@ _HEADERS = [
 
 
 def _service():
+    import httplib2
+    import google_auth_httplib2
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
+    import os
     sa_path = require_env("GOOGLE_SERVICE_ACCOUNT_JSON")
     creds = service_account.Credentials.from_service_account_file(sa_path, scopes=_SCOPES)
-    return build("sheets", "v4", credentials=creds, cache_discovery=False)
+    # SSL verification can be disabled for environments with intercepting proxies (e.g. Claude Code web)
+    no_verify = os.getenv("DISABLE_SSL_VERIFY", "0") == "1"
+    http = httplib2.Http(disable_ssl_certificate_validation=no_verify)
+    authorized_http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
+    return build("sheets", "v4", http=authorized_http, cache_discovery=False)
 
 
 def _pf(value: bool) -> str:

@@ -1,0 +1,31 @@
+name: Stock Analysis Pipeline
+
+on:
+  schedule:
+    - cron: '0 23 * * 1'   # Every Monday at 23:00 UTC
+  workflow_dispatch:         # Manual trigger from GitHub UI
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write service account JSON
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: echo "$SA_JSON" > /tmp/sa.json
+
+      - name: Run pipeline
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: /tmp/sa.json
+          GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
+        run: python orchestrator.py --yfinance --now
