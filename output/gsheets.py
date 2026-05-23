@@ -22,14 +22,22 @@ _HEADERS = [
 
 
 def _service():
+    import json
+    import os
     import httplib2
     import google_auth_httplib2
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
-    import os
-    sa_path = require_env("GOOGLE_SERVICE_ACCOUNT_JSON")
-    creds = service_account.Credentials.from_service_account_file(sa_path, scopes=_SCOPES)
-    # SSL verification can be disabled for environments with intercepting proxies (e.g. Claude Code web)
+
+    # Prefer JSON content from env var (GitHub Actions) over file path (local)
+    sa_content = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    try:
+        info = json.loads(sa_content)
+        creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
+    except (json.JSONDecodeError, TypeError):
+        # sa_content is a file path, not JSON
+        creds = service_account.Credentials.from_service_account_file(sa_content, scopes=_SCOPES)
+
     no_verify = os.getenv("DISABLE_SSL_VERIFY", "0") == "1"
     http = httplib2.Http(disable_ssl_certificate_validation=no_verify)
     authorized_http = google_auth_httplib2.AuthorizedHttp(creds, http=http)
