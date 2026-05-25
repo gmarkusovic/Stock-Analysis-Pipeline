@@ -21,28 +21,59 @@ _HEADERS = [
 ]
 
 
+def _build_info_from_parts(os, base64) -> dict | None:
+    """Reconstruct service account info from individual env vars (iPad-friendly secrets)."""
+    p1 = os.getenv("GOOGLE_PRIVATE_KEY_P1", "")
+    p2 = os.getenv("GOOGLE_PRIVATE_KEY_P2", "")
+    email = os.getenv("GOOGLE_CLIENT_EMAIL", "")
+    if not (p1 and email):
+        return None
+    private_key = base64.b64decode(p1 + p2).decode("utf-8")
+    return {
+        "type": "service_account",
+        "project_id": "stock-pipeline-497122",
+        "private_key_id": "485aeb2db1890c4a2b3a84e095607b74cc342450",
+        "private_key": private_key,
+        "client_email": email,
+        "client_id": "104351734846412693077",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+
+
 def _service():
-    import json
-    import os
-    import httplib2
-    import google_auth_httplib2
+    import json, os, base64
+    import httplib2, google_auth_httplib2
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
-    import base64
-    sa_content = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     info = None
-    for attempt in (sa_content, None):
-        try:
-            info = json.loads(attempt if attempt is not None else base64.b64decode(sa_content))
-            break
-        except Exception:
-            pass
-    if info:
-        creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
+
+    # Priority 1: individual secrets (iPad-friendly, 3 short strings)
+    info = _build_info_from_parts(os, base64)
+
+    # Priority 2: full JSON string or base64-encoded JSON (single secret)
+    if not info:
+        sa_content = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        for attempt in (sa_content, None):
+            try:
+                info = json.loads(attempt if attempt is not None else base64.b64decode(sa_content))
+                break
+            except Exception:
+                pass
+
+    # Priority 3: file path
+    if not info:
+        sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        if sa_path:
+            creds = service_account.Credentials.from_service_account_file(sa_path, scopes=_SCOPES)
+        else:
+            raise EnvironmentError(
+                "No Google credentials found. Set GOOGLE_PRIVATE_KEY_P1 + GOOGLE_PRIVATE_KEY_P2 + "
+                "GOOGLE_CLIENT_EMAIL, or GOOGLE_SERVICE_ACCOUNT_JSON."
+            )
     else:
-        # sa_content is a file path
-        creds = service_account.Credentials.from_service_account_file(sa_content, scopes=_SCOPES)
+        creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
 
     no_verify = os.getenv("DISABLE_SSL_VERIFY", "0") == "1"
     http = httplib2.Http(disable_ssl_certificate_validation=no_verify)

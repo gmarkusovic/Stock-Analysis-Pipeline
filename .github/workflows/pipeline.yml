@@ -21,22 +21,19 @@ jobs:
 
       - name: Check secrets are set
         env:
-          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          P1: ${{ secrets.GOOGLE_PRIVATE_KEY_P1 }}
+          EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
           SHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
         run: |
-          if [ -z "$SA_JSON" ]; then
-            echo "ERROR: secret GOOGLE_SERVICE_ACCOUNT_JSON is empty or not set"
-            exit 1
-          fi
-          if [ -z "$SHEET_ID" ]; then
-            echo "ERROR: secret GOOGLE_SPREADSHEET_ID is empty or not set"
-            exit 1
-          fi
-          echo "GOOGLE_SERVICE_ACCOUNT_JSON length: ${#SA_JSON}"
-          echo "GOOGLE_SPREADSHEET_ID: $SHEET_ID"
+          [ -z "$P1" ]      && echo "ERROR: GOOGLE_PRIVATE_KEY_P1 not set"    && exit 1 || true
+          [ -z "$EMAIL" ]   && echo "ERROR: GOOGLE_CLIENT_EMAIL not set"       && exit 1 || true
+          [ -z "$SHEET_ID" ] && echo "ERROR: GOOGLE_SPREADSHEET_ID not set"   && exit 1 || true
+          echo "Secrets OK — email=$EMAIL  sheet=$SHEET_ID  key_p1_len=${#P1}"
 
       - name: Run pipeline
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_PRIVATE_KEY_P1: ${{ secrets.GOOGLE_PRIVATE_KEY_P1 }}
+          GOOGLE_PRIVATE_KEY_P2: ${{ secrets.GOOGLE_PRIVATE_KEY_P2 }}
+          GOOGLE_CLIENT_EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
           GOOGLE_SPREADSHEET_ID: ${{ secrets.GOOGLE_SPREADSHEET_ID }}
         run: python orchestrator.py --yfinance --now
