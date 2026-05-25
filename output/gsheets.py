@@ -129,39 +129,58 @@ def _build_data_rows(results: list[dict], run_date: date) -> list[list]:
     return rows
 
 
-def _has_header(svc, spreadsheet_id: str, sheet_name: str) -> bool:
-    """True if cell A1 already contains the header label."""
+def _get_all_rows(svc, spreadsheet_id: str, sheet_name: str) -> list[list]:
     result = svc.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{sheet_name}'!A1",
+        range=f"'{sheet_name}'",
     ).execute()
-    values = result.get("values", [])
-    return bool(values) and values[0][0] == "Date"
+    return result.get("values", [])
+
+
+def _rewrite_sheet(svc, spreadsheet_id: str, sheet_name: str, rows: list[list]):
+    svc.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id, range=f"'{sheet_name}'"
+    ).execute()
+    if rows:
+        svc.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_name}'!A1",
+            valueInputOption="RAW",
+            body={"values": rows},
+        ).execute()
 
 
 def write(results: list[dict], run_date: date | None = None, sheet_name: str = "Analysis"):
     if run_date is None:
         run_date = date.today()
 
+    date_str = run_date.isoformat()
     spreadsheet_id = require_env("GOOGLE_SPREADSHEET_ID")
     svc = _service()
 
-    if not _has_header(svc, spreadsheet_id, sheet_name):
-        svc.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A1",
-            valueInputOption="RAW",
-            body={"values": [_HEADERS]},
-        ).execute()
+    # Load existing rows, strip any rows for today (idempotent re-runs)
+    existing = _get_all_rows(svc, spreadsheet_id, sheet_name)
+    if existing:
+        header = existing[0]
+        kept = [r for r in existing[1:] if r and r[0] != date_str]
+    else:
+        header = _HEADERS
+        kept = []
 
-    rows = _build_data_rows(results, run_date)
-    svc.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{sheet_name}'!A1",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": rows},
-    ).execute()
+    new_rows = _build_data_rows(results, run_date)
+    final = [header] + kept + new_rows
+
+    _rewrite_sheet(svc, spreadsheet_id, sheet_name, final)
 
     ok_count = sum(1 for r in results if r["status"] == "ok")
-    print(f"Google Sheets updated: {ok_count}/{len(results)} rows appended  [{run_date.isoformat()}]")
+    print(f"Google Sheets updated: {ok_count}/{len(results)} rows written  [{date_str}]")
+
+
+def clear_and_reset(sheet_name: str = "Analysis"):
+    """Utility: wipe the sheet and write only the header. Run once to clean up."""
+    spreadsheet_id = require_env("GOOGLE_SPREADSHEET_ID")
+    svc = _service()
+    _rewrite_sheet(svc, spreadsheet_id, sheet_name, [_HEADERS])
+    print(f"Sheet '{sheet_name}' cleared.")
+
+
