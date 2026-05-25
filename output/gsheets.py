@@ -7,8 +7,16 @@ Writes analysis results to a single Google Sheet, appending rows on each run.
 Auth: Google service account with Sheets scope.
 """
 
+import math
 from datetime import date
 from config import require_env, THRESHOLDS
+
+
+def _clean(val):
+    """Replace NaN/inf (invalid JSON) with 'N/A' so Sheets API never chokes."""
+    if isinstance(val, float) and not math.isfinite(val):
+        return "N/A"
+    return val
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -89,7 +97,7 @@ def _build_data_rows(results: list[dict], run_date: date) -> list[list]:
     """Returns only data rows (no header). Each row starts with the run date."""
     ok     = [r for r in results if r["status"] == "ok"]
     errors = [r for r in results if r["status"] == "data_error"]
-    ok.sort(key=lambda r: (r["score"], r["metrics"]["spread"]), reverse=True)
+    ok.sort(key=lambda r: (r["score"], 0 if not math.isfinite(r["metrics"]["spread"] or 0) else r["metrics"]["spread"]), reverse=True)
 
     date_str = run_date.isoformat()
     rows = []
@@ -97,7 +105,8 @@ def _build_data_rows(results: list[dict], run_date: date) -> list[list]:
     for i, r in enumerate(ok, 1):
         m = r["metrics"]
         c = r["checks"]
-        dgr_str = f"{m['dgr']:.2f}" if m["dgr"] is not None else "N/A"
+        dgr_val = m["dgr"]
+        dgr_str = f"{dgr_val:.2f}" if (dgr_val is not None and math.isfinite(dgr_val)) else "N/A"
         rows.append([
             date_str,
             i,
@@ -105,14 +114,14 @@ def _build_data_rows(results: list[dict], run_date: date) -> list[list]:
             r["name"],
             r["sector"],
             f"{r['score']}/5",
-            round(m["dy"], 2),
+            _clean(round(m["dy"], 2)),
             dgr_str,
-            round(m["payout_ratio"], 1),
-            round(m["fcf_coverage"], 2),
-            round(m["spread"], 1),
-            round(m["price"], 2),
-            round(m["analyst_target"], 2),
-            round(m["annual_dividend"], 2),
+            _clean(round(m["payout_ratio"], 1)),
+            _clean(round(m["fcf_coverage"], 2)),
+            _clean(round(m["spread"], 1)),
+            _clean(round(m["price"], 2)),
+            _clean(round(m["analyst_target"], 2)),
+            _clean(round(m["annual_dividend"], 2)),
             _pf(c["dy"]),
             _pf(c["dgr"]),
             _pf(c["payout_ratio"]),
